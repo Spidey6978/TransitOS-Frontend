@@ -1,3 +1,12 @@
 export default function TrafficMap() {
-  return <div className="text-white p-8">Traffic Map</div>
+  return (
+    <div className="w-full h-[calc(100vh-60px)] bg-slate-950">
+      <iframe 
+        src="http://localhost:8501/?embed=true" 
+        className="w-full h-full border-none"
+        title="TransitOS Traffic Mesh"
+        allow="autoplay; fullscreen"
+      />
+    </div>
+  )
 }

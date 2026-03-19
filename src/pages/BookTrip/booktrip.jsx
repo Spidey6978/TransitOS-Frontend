@@ -124,12 +124,13 @@ export default function BookTrip() {
     setStep(2)
   }
 
-  function handleConfirm() {
-    setLoading(true)
-    setError('')
-    const ticket_id   = uuidv4()
-    const now         = new Date()
-    const valid_until = new Date(now.getTime() + 3 * 60 * 60 * 1000)
+  async function handleConfirm() {
+    setLoading(true);
+    setError('');
+    const ticket_id   = uuidv4();
+    const now         = new Date();
+    const valid_until = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+    
     const newTicket   = {
       ticket_id,
       commuter_name: name,
@@ -141,13 +142,32 @@ export default function BookTrip() {
       timestamp:     now.getTime(),
       issued_at:     now.toISOString(),
       valid_until:   valid_until.toISOString(),
+    };
+
+    saveTicketLocally(newTicket);
+    
+    // --- NEW: TRY LIVE SYNC IMMEDIATELY ---
+    try {
+      await api.post('/book_ticket', {
+        commuter_name: name,
+        from_station: from,
+        to_station: to,
+        mode: selectedRoute.mode,
+        ticket_id: ticket_id
+      });
+      console.log("On-chain settlement triggered!");
+    } catch (err) {
+      console.warn("Server offline, ticket saved to offline queue.");
+      queueOfflineTicket(newTicket);
     }
-    saveTicketLocally(newTicket)
-    queueOfflineTicket(newTicket)
-    setTicket(newTicket)
-    setLoading(false)
-    setStep(3)
+
+    setTicket(newTicket);
+    setLoading(false);
+    setStep(3);
   }
+
+
+
 
   function handleReset() {
     setStep(0)

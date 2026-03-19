@@ -5,7 +5,7 @@ import {
   QrCode, X, CheckCircle2, MapPin, Clock,
   Plus, Send, CreditCard, RefreshCw
 } from 'lucide-react'
-import { QRCode } from 'react-qr-code'
+import QRCode from 'react-qr-code'
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -99,10 +99,8 @@ function AddMoneyModal({ onClose, onAdd }) {
         style={{ background: '#0F172A' }}
         onClick={e => e.stopPropagation()}
       >
-        {/* mobile drag handle */}
         <div className="w-10 h-1 rounded-full bg-white/20 mx-auto mb-5 sm:hidden" />
 
-        {/* close */}
         <button
           onClick={onClose}
           className="absolute top-5 right-5 text-slate-500 hover:text-white transition-colors"
@@ -110,7 +108,6 @@ function AddMoneyModal({ onClose, onAdd }) {
           <X className="w-5 h-5" />
         </button>
 
-        {/* title */}
         <div className="mb-5">
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <Plus className="w-5 h-5 text-[#22D3EE]" /> Add Money
@@ -118,7 +115,6 @@ function AddMoneyModal({ onClose, onAdd }) {
           <p className="text-slate-500 text-xs mt-0.5">Choose a preset or enter a custom amount</p>
         </div>
 
-        {/* custom input */}
         <div
           className="flex items-center gap-2 rounded-xl border px-4 py-3 mb-4 transition-colors"
           style={{
@@ -145,7 +141,6 @@ function AddMoneyModal({ onClose, onAdd }) {
           )}
         </div>
 
-        {/* quick amounts */}
         <p className="text-[10px] text-slate-500 tracking-widest uppercase mb-2">Quick Add</p>
         <div className="grid grid-cols-3 gap-2 mb-5">
           {QUICK_AMOUNTS.map(val => (
@@ -164,7 +159,6 @@ function AddMoneyModal({ onClose, onAdd }) {
           ))}
         </div>
 
-        {/* live summary */}
         {isValid && (
           <div
             className="flex justify-between items-center rounded-xl px-4 py-3 mb-4 border border-green-500/20"
@@ -175,7 +169,6 @@ function AddMoneyModal({ onClose, onAdd }) {
           </div>
         )}
 
-        {/* confirm */}
         <button
           onClick={handleConfirm}
           disabled={!isValid}
@@ -283,8 +276,6 @@ function TicketModal({ ticket, onClose }) {
   )
 }
 
-// ─── Transaction Row ──────────────────────────────────────────────────────────
-
 function TxRow({ ticket, onViewQR }) {
   const { bg, text, border } = getModeColors(ticket.mode)
   const label = getModeLabel(ticket.mode)
@@ -320,24 +311,38 @@ function TxRow({ ticket, onViewQR }) {
   )
 }
 
-// ─── Main Wallet Page ─────────────────────────────────────────────────────────
-
 export default function WalletPage() {
   const [tickets,        setTickets]        = useState([])
-  const [balance,        setBalance]        = useState(1000.00)
+  const [balance,        setBalance]        = useState(0)
   const [selectedTicket, setSelectedTicket] = useState(null)
   const [refreshing,     setRefreshing]     = useState(false)
   const [showAddMoney,   setShowAddMoney]   = useState(false)
 
-  useEffect(() => { setTickets(loadTickets()) }, [])
+  useEffect(() => { 
+    setTickets(loadTickets());
+    const savedBalance = localStorage.getItem('transitos_balance');
+    if (savedBalance === null) {
+      localStorage.setItem('transitos_balance', '1000.00');
+      setBalance(1000.00);
+    } else {
+      setBalance(parseFloat(savedBalance));
+    }
+  }, [])
 
   function handleRefresh() {
     setRefreshing(true)
-    setTimeout(() => { setTickets(loadTickets()); setRefreshing(false) }, 600)
+    setTimeout(() => { 
+      setTickets(loadTickets());
+      const savedBalance = localStorage.getItem('transitos_balance');
+      setBalance(parseFloat(savedBalance || '0'));
+      setRefreshing(false);
+    }, 600)
   }
 
   function handleAddMoney(amount) {
-    setBalance(b => parseFloat((b + amount).toFixed(2)))
+    const newBalance = parseFloat((balance + amount).toFixed(2));
+    setBalance(newBalance);
+    localStorage.setItem('transitos_balance', newBalance.toString());
   }
 
   const totalSpent = tickets.reduce((s, t) => s + Number(t.fare || 0), 0)
@@ -352,8 +357,6 @@ export default function WalletPage() {
       )}
 
       <div className="min-h-screen" style={{ background: '#0F172A', fontFamily: "'Space Mono', monospace" }}>
-
-        {/* top nav */}
         <div className="flex items-center justify-between px-5 pt-5 pb-2">
           <span className="text-[#0EA5E9] font-bold tracking-widest text-base">TransitOS</span>
           <button onClick={handleRefresh} className="text-slate-500 hover:text-white transition-colors">
@@ -361,7 +364,6 @@ export default function WalletPage() {
           </button>
         </div>
 
-        {/* page title */}
         <div className="px-5 pt-3 pb-1">
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <Wallet className="w-6 h-6 text-[#22D3EE]" /> Wallet
@@ -369,7 +371,6 @@ export default function WalletPage() {
           <p className="text-slate-500 text-sm mt-0.5">Manage your balance and view transaction history</p>
         </div>
 
-        {/* balance card */}
         <div className="px-5 mt-4">
           <div
             className="rounded-2xl p-5 relative overflow-hidden"
@@ -402,7 +403,6 @@ export default function WalletPage() {
           </div>
         </div>
 
-        {/* stats */}
         <div className="grid grid-cols-2 gap-3 px-5 mt-4">
           <div className="rounded-xl p-4 border border-white/5" style={{ background: 'rgba(30,41,59,0.6)' }}>
             <p className="text-[10px] text-slate-500 tracking-widest uppercase mb-1">Total Trips</p>
@@ -414,7 +414,6 @@ export default function WalletPage() {
           </div>
         </div>
 
-        {/* transaction history */}
         <div className="px-5 mt-6 pb-8">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-white font-bold text-base">Transaction History</h2>

@@ -1,393 +1,446 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-// Import the centralized API config with Ngrok headers
-import api from "../../service/api"; 
+import { useState, useEffect } from 'react'
+import { cn } from '@/lib/utils'
+import {
+  Wallet, Train, Bus, Zap, Anchor,
+  QrCode, X, CheckCircle2, MapPin, Clock,
+  Plus, Send, CreditCard, RefreshCw
+} from 'lucide-react'
+import QRCode from 'react-qr-code'
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-const INDIAN_NAMES = [
-  "Aarav Patel","Rohan Sharma","Ananya Gupta","Vikram Singh","Priya Desai",
-  "Rahul Mehta","Sneha Iyer","Aditya Joshi","Kavya Nair","Arjun Reddy",
-  "Meera Pillai","Karan Malhotra","Divya Rao","Nikhil Jain","Pooja Verma",
-];
-const MODES = ["Local Train","Metro","AC Metro","Hybrid","Ferry"];
-const MODE_COLORS = {
-  "Local Train": "#0EA5E9",
-  "Metro":       "#22D3EE",
-  "AC Metro":    "#818CF8",
-  "Hybrid":      "#F59E0B",
-  "Ferry":       "#34D399",
-};
-const MOCK_STATIONS = [
-  "Churchgate","Marine Lines","Charni Road","Grant Road","Mumbai Central",
-  "Mahalaxmi","Lower Parel","Prabhadevi","Dadar (Western)","Matunga Road",
-  "Mahim","Bandra","Khar Road","Santacruz","Vile Parle","Andheri","Jogeshwari",
-  "Goregaon","Malad","Kandivali","Borivali","Dahisar","CST","Kurla","Thane",
-];
+// ─── helpers ─────────────────────────────────────────────────────────────────
 
-function rand(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-function randFloat(min, max) { return +(min + Math.random() * (max - min)).toFixed(2); }
-
-function generateMockTicket(id) {
-  const from = rand(MOCK_STATIONS);
-  const to   = rand(MOCK_STATIONS.filter(s => s !== from));
-  const mode = rand(MODES);
-  const dist = randFloat(2, 35);
-  let fare = 10 + 2 * dist;
-  if (mode === "AC Metro") fare *= 1.5;
-  fare = +fare.toFixed(2);
-  const splits = {
-    "Local Train": `Railways: ₹${+(fare*0.95).toFixed(2)} | TransitOS: ₹${+(fare*0.05).toFixed(2)}`,
-    "Metro":       `MMRDA: ₹${+(fare*0.90).toFixed(2)} | TransitOS: ₹${+(fare*0.10).toFixed(2)}`,
-    "AC Metro":    `MMRDA: ₹${+(fare*0.90).toFixed(2)} | TransitOS: ₹${+(fare*0.10).toFixed(2)}`,
-    "Hybrid":      `Railways: ₹${+(fare*0.50).toFixed(2)} | BEST: ₹${+(fare*0.40).toFixed(2)} | TransitOS: ₹${+(fare*0.10).toFixed(2)}`,
-    "Ferry":       `Operator: ₹${+(fare*0.95).toFixed(2)} | TransitOS: ₹${+(fare*0.05).toFixed(2)}`,
-  };
-  return {
-    hash: `0x${Math.random().toString(16).slice(2,12)}...`,
-    timestamp: new Date(Date.now() - Math.random() * 3600000).toISOString(),
-    commuter_name: rand(INDIAN_NAMES),
-    start_station: from,
-    end_station: to,
-    mode,
-    distance_km: dist,
-    total_fare: fare,
-    operator_split: splits[mode],
-    id,
-  };
+function getModeIcon(mode = '') {
+  const m = mode.toLowerCase()
+  if (m.includes('metro') || m.includes('monorail')) return <Zap    className="w-3.5 h-3.5" />
+  if (m.includes('bus')   || m.includes('uber'))     return <Bus    className="w-3.5 h-3.5" />
+  if (m.includes('ferry'))                            return <Anchor className="w-3.5 h-3.5" />
+  return <Train className="w-3.5 h-3.5" />
 }
 
-// ─── Stat Card ────────────────────────────────────────────────────────────────
-function StatCard({ label, value, sub, color = "#22D3EE" }) {
+function getModeLabel(mode = '') {
+  const m = mode.toLowerCase()
+  if (m.includes('metro') || m.includes('monorail')) return 'METRO'
+  if (m.includes('bus')   || m.includes('uber'))     return 'BUS'
+  if (m.includes('ferry'))                            return 'FERRY'
+  return 'RAIL'
+}
+
+function getModeColors(mode = '') {
+  const m = mode.toLowerCase()
+  if (m.includes('metro') || m.includes('monorail'))
+    return { bg: 'bg-violet-500/20', text: 'text-violet-300', border: 'border-violet-500/30' }
+  if (m.includes('bus') || m.includes('uber'))
+    return { bg: 'bg-amber-500/20', text: 'text-amber-300', border: 'border-amber-500/30' }
+  if (m.includes('ferry'))
+    return { bg: 'bg-teal-500/20', text: 'text-teal-300', border: 'border-teal-500/30' }
+  return { bg: 'bg-blue-500/20', text: 'text-blue-300', border: 'border-blue-500/30' }
+}
+
+function formatDate(iso) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: true,
+  })
+}
+
+function shortId(ticket_id = '') {
+  return 'TKT-' + ticket_id.replace(/-/g, '').slice(0, 8).toUpperCase()
+}
+
+function loadTickets() {
+  try { return JSON.parse(localStorage.getItem('transitos_tickets') || '[]') }
+  catch { return [] }
+}
+
+// ─── Add Money Modal ──────────────────────────────────────────────────────────
+
+const QUICK_AMOUNTS = [100, 250, 500, 1000, 2000, 5000]
+
+function AddMoneyModal({ onClose, onAdd }) {
+  const [input,    setInput]    = useState('')
+  const [selected, setSelected] = useState(null)
+  const [success,  setSuccess]  = useState(false)
+
+  const parsed  = parseFloat(input)
+  const amount  = selected !== null ? selected : (!isNaN(parsed) ? parsed : 0)
+  const isValid = amount > 0 && amount <= 100000
+
+  function handleQuickPick(val) {
+    setSelected(val)
+    setInput(String(val))
+  }
+
+  function handleInputChange(e) {
+    const raw = e.target.value.replace(/[^0-9.]/g, '')
+    setInput(raw)
+    setSelected(null)
+  }
+
+  function handleClear() {
+    setInput('')
+    setSelected(null)
+  }
+
+  function handleConfirm() {
+    if (!isValid) return
+    setSuccess(true)
+    setTimeout(() => { onAdd(amount); onClose() }, 900)
+  }
+
   return (
-    <div style={{
-      background: "#0D1B2E", border: "1px solid #1E3A5F",
-      borderRadius: 12, padding: "16px 20px",
-      display: "flex", flexDirection: "column", gap: 4,
-      position: "relative", overflow: "hidden",
-    }}>
-      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: color, opacity: 0.7 }}/>
-      <span style={{ fontSize: 11, color: "#4A7FA5", letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: "'Courier New', monospace" }}>
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+      style={{ background: 'rgba(15,23,42,0.88)', backdropFilter: 'blur(10px)' }}
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-sm rounded-t-3xl sm:rounded-2xl border border-white/10 p-6 shadow-2xl"
+        style={{ background: '#0F172A' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="w-10 h-1 rounded-full bg-white/20 mx-auto mb-5 sm:hidden" />
+
+        <button
+          onClick={onClose}
+          className="absolute top-5 right-5 text-slate-500 hover:text-white transition-colors"
+        >
+          <X className="w-5 h-5" />
+        </button>
+
+        <div className="mb-5">
+          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+            <Plus className="w-5 h-5 text-[#22D3EE]" /> Add Money
+          </h2>
+          <p className="text-slate-500 text-xs mt-0.5">Choose a preset or enter a custom amount</p>
+        </div>
+
+        <div
+          className="flex items-center gap-2 rounded-xl border px-4 py-3 mb-4 transition-colors"
+          style={{
+            background: 'rgba(30,41,59,0.7)',
+            borderColor: input && selected === null ? '#0EA5E9' : 'rgba(255,255,255,0.08)',
+          }}
+        >
+          <span className="text-[#22D3EE] text-lg font-bold">₹</span>
+          <input
+            autoFocus
+            type="number"
+            min="1"
+            max="100000"
+            placeholder="Enter amount"
+            value={input}
+            onChange={handleInputChange}
+            className="flex-1 bg-transparent text-white text-xl font-bold outline-none placeholder:text-slate-600
+              [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+          />
+          {input && (
+            <button onClick={handleClear} className="text-slate-600 hover:text-slate-400 transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        <p className="text-[10px] text-slate-500 tracking-widest uppercase mb-2">Quick Add</p>
+        <div className="grid grid-cols-3 gap-2 mb-5">
+          {QUICK_AMOUNTS.map(val => (
+            <button
+              key={val}
+              onClick={() => handleQuickPick(val)}
+              className={cn(
+                'py-2.5 rounded-xl text-sm font-bold border transition-all duration-150',
+                selected === val
+                  ? 'bg-[#0EA5E9] border-[#0EA5E9] text-white shadow-lg shadow-[#0EA5E9]/30'
+                  : 'bg-transparent border-white/10 text-slate-300 hover:border-[#0EA5E9]/40 hover:text-white',
+              )}
+            >
+              ₹{val >= 1000 ? `${val / 1000}K` : val}
+            </button>
+          ))}
+        </div>
+
+        {isValid && (
+          <div
+            className="flex justify-between items-center rounded-xl px-4 py-3 mb-4 border border-green-500/20"
+            style={{ background: 'rgba(74,222,128,0.06)' }}
+          >
+            <span className="text-xs text-slate-400">Adding to wallet</span>
+            <span className="text-base font-bold text-[#4ADE80]">+₹{amount.toFixed(2)}</span>
+          </div>
+        )}
+
+        <button
+          onClick={handleConfirm}
+          disabled={!isValid}
+          className={cn(
+            'w-full font-bold py-3.5 rounded-xl text-sm transition-all duration-200 flex items-center justify-center gap-2',
+            success
+              ? 'bg-[#4ADE80] text-[#0F172A]'
+              : isValid
+                ? 'bg-[#0EA5E9] hover:bg-[#22D3EE] text-white shadow-lg shadow-[#0EA5E9]/25'
+                : 'bg-white/5 text-slate-600 cursor-not-allowed',
+          )}
+        >
+          {success ? (
+            <><CheckCircle2 className="w-4 h-4" /> Money Added!</>
+          ) : (
+            <>Add {isValid ? `₹${amount.toFixed(2)}` : 'Money'}</>
+          )}
+        </button>
+
+        <p className="text-[10px] text-slate-700 text-center mt-3 tracking-wide">
+          Max ₹1,00,000 per transaction
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// ─── QR / Ticket Modal ────────────────────────────────────────────────────────
+
+function TicketModal({ ticket, onClose }) {
+  if (!ticket) return null
+
+  const qrValue = JSON.stringify({
+    ticket_id:     ticket.ticket_id,
+    commuter_name: ticket.commuter_name,
+    from_station:  ticket.from_station,
+    to_station:    ticket.to_station,
+    mode:          ticket.mode,
+    issued_at:     ticket.issued_at,
+  })
+
+  const isValid = ticket.valid_until ? new Date(ticket.valid_until) > new Date() : true
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center px-4"
+      style={{ background: 'rgba(15,23,42,0.85)', backdropFilter: 'blur(8px)' }}
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-sm rounded-2xl border border-white/10 p-6 shadow-2xl"
+        style={{ background: '#0F172A' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <button onClick={onClose} className="absolute top-4 right-4 text-slate-500 hover:text-white transition-colors">
+          <X className="w-5 h-5" />
+        </button>
+
+        <div className="flex flex-col items-center mb-5">
+          <h2 className="text-lg font-bold tracking-widest uppercase text-[#22D3EE]">TransitOS</h2>
+          <p className="text-[10px] text-slate-500 tracking-widest uppercase">Mumbai Unified Transit</p>
+          <span className={cn(
+            'mt-2 inline-flex items-center gap-1.5 text-xs px-3 py-1 rounded-full border',
+            isValid
+              ? 'bg-green-500/10 border-green-500/30 text-green-400'
+              : 'bg-rose-500/10 border-rose-500/30 text-rose-400',
+          )}>
+            <CheckCircle2 className="w-3 h-3" />
+            {isValid ? 'ACTIVE' : 'EXPIRED'}
+          </span>
+        </div>
+
+        <div className="flex justify-center mb-5">
+          <div className="bg-white p-3 rounded-xl shadow-lg shadow-cyan-500/10">
+            <QRCode value={qrValue} size={180} level="H" bgColor="#ffffff" fgColor="#000000" />
+          </div>
+        </div>
+
+        <div
+          className="rounded-xl border border-white/10 p-4 space-y-2.5 mb-3"
+          style={{ background: 'rgba(30,41,59,0.6)' }}
+        >
+          {[
+            { label: 'Ticket ID',   value: shortId(ticket.ticket_id) },
+            { label: 'Route',       value: `${ticket.from_station} → ${ticket.to_station}`, icon: <MapPin className="w-3 h-3" /> },
+            { label: 'Mode',        value: ticket.mode },
+            { label: 'Issued At',   value: formatDate(ticket.issued_at), icon: <Clock className="w-3 h-3" /> },
+            { label: 'Valid Until', value: formatDate(ticket.valid_until) },
+          ].map(({ label, value, icon }) => (
+            <div key={label} className="flex items-start justify-between gap-4 text-sm">
+              <span className="text-[10px] text-slate-500 tracking-widest uppercase shrink-0 pt-0.5">{label}</span>
+              <span className="text-white font-medium text-right flex items-center gap-1">{icon}{value}</span>
+            </div>
+          ))}
+        </div>
+
+        <p className="text-[10px] text-slate-600 text-center tracking-wide">
+          Show this QR code to validators during your journey
+        </p>
+        <p className="text-[10px] text-slate-700 tracking-widest uppercase text-center mt-1">
+          One ID · One Ticket · Any Mode
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function TxRow({ ticket, onViewQR }) {
+  const { bg, text, border } = getModeColors(ticket.mode)
+  const label = getModeLabel(ticket.mode)
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-3.5 border-b border-white/5 hover:bg-white/[0.03] transition-colors cursor-default">
+      <span className={cn('text-[10px] font-bold tracking-widest px-2 py-0.5 rounded-md border shrink-0 flex items-center gap-1', bg, text, border)}>
+        {getModeIcon(ticket.mode)}
         {label}
       </span>
-      <span style={{ fontSize: 26, fontWeight: 700, color, fontFamily: "'Courier New', monospace", lineHeight: 1.1 }}>
-        {value}
-      </span>
-      {sub && <span style={{ fontSize: 11, color: "#4A7FA5" }}>{sub}</span>}
+
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-slate-500 truncate">{shortId(ticket.ticket_id)}</p>
+        <p className="text-sm text-white font-medium truncate leading-tight">
+          {ticket.from_station} → {ticket.to_station}
+        </p>
+        <p className="text-[10px] text-slate-500 mt-0.5">{formatDate(ticket.issued_at)}</p>
+      </div>
+
+      <div className="flex flex-col items-end gap-1.5 shrink-0">
+        <span className="text-sm font-semibold text-[#F43F5E]">
+          −₹{Number(ticket.fare || 0).toFixed(2)}
+        </span>
+        <button
+          onClick={() => onViewQR(ticket)}
+          className="flex items-center gap-1 text-[10px] text-[#0EA5E9] border border-[#0EA5E9]/30 rounded-lg px-2 py-0.5 hover:bg-[#0EA5E9]/10 transition-colors"
+        >
+          <QrCode className="w-3 h-3" />
+          Ticket
+        </button>
+      </div>
     </div>
-  );
+  )
 }
 
-// ─── Mode Badge ───────────────────────────────────────────────────────────────
-function ModeBadge({ mode }) {
-  const color = MODE_COLORS[mode] || "#22D3EE";
-  return (
-    <span style={{
-      fontSize: 10, padding: "2px 8px", borderRadius: 4,
-      border: `1px solid ${color}40`, color, background: `${color}15`,
-      fontFamily: "'Courier New', monospace", letterSpacing: "0.05em",
-      whiteSpace: "nowrap",
-    }}>
-      {mode}
-    </span>
-  );
-}
-
-// ─── Ledger Row ───────────────────────────────────────────────────────────────
-const tdStyle = { padding: "8px 12px", fontSize: 12, color: "#CBD5E1", borderBottom: "1px solid #1E3A5F" };
-
-function LedgerRow({ ticket, index }) {
-  return (
-    <tr style={{ background: index % 2 === 0 ? "transparent" : "#0A1628" }}>
-      <td style={tdStyle}><span style={{ color: "#22D3EE", fontFamily: "monospace", fontSize: 11 }}>{ticket.hash.slice(0, 14)}…</span></td>
-      <td style={tdStyle}>{ticket.commuter_name}</td>
-      <td style={tdStyle}>
-        <span style={{ color: "#94A3B8", fontSize: 11 }}>{ticket.start_station}</span>
-        {" → "}
-        <span style={{ color: "#94A3B8", fontSize: 11 }}>{ticket.end_station}</span>
-      </td>
-      <td style={tdStyle}><ModeBadge mode={ticket.mode} /></td>
-      <td style={{ ...tdStyle, color: "#4ADE80", fontFamily: "monospace" }}>₹{ticket.total_fare}</td>
-      <td style={{ ...tdStyle, color: "#4A7FA5", fontSize: 11, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ticket.operator_split}</td>
-    </tr>
-  );
-}
-
-// ─── Mode Distribution ────────────────────────────────────────────────────────
-function ModeDistribution({ tickets }) {
-  const counts = {};
-  tickets.forEach(t => { counts[t.mode] = (counts[t.mode] || 0) + 1; });
-  const total = tickets.length || 1;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([mode, count]) => {
-        const pct = Math.round((count / total) * 100);
-        const color = MODE_COLORS[mode] || "#22D3EE";
-        return (
-          <div key={mode} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ width: 90, fontSize: 11, color: "#94A3B8", textAlign: "right", fontFamily: "monospace", flexShrink: 0 }}>{mode}</span>
-            <div style={{ flex: 1, height: 16, background: "#0D1B2E", borderRadius: 4, overflow: "hidden" }}>
-              <div style={{ width: `${pct}%`, height: "100%", background: color, opacity: 0.85, borderRadius: 4, transition: "width 0.6s ease" }}/>
-            </div>
-            <span style={{ width: 38, fontSize: 11, color, fontFamily: "monospace", textAlign: "right" }}>{pct}%</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ─── Revenue Timeline ─────────────────────────────────────────────────────────
-function RevenueTimeline({ tickets }) {
-  const buckets = {};
-  tickets.forEach(t => {
-    const dt = new Date(t.timestamp);
-    const key = `${dt.getHours()}:${String(dt.getMinutes()).padStart(2,"0")}`;
-    buckets[key] = (buckets[key] || 0) + t.total_fare;
-  });
-  const entries = Object.entries(buckets).slice(-12);
-  if (entries.length < 2) return (
-    <div style={{ color: "#4A7FA5", fontSize: 12, padding: "20px 0", textAlign: "center" }}>Accumulating data…</div>
-  );
-  const W = 340, H = 80;
-  const maxVal = Math.max(...entries.map(e => e[1]));
-  const area = `M 0,${H} L ${entries.map(([, v], i) => `${(i/(entries.length-1))*W},${H-(v/maxVal)*H*0.9-4}`).join(" L ")} L ${W},${H} Z`;
-  const pts  = entries.map(([, v], i) => `${(i/(entries.length-1))*W},${H-(v/maxVal)*H*0.9-4}`).join(" ");
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 80 }}>
-      <defs>
-        <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#22D3EE" stopOpacity="0.3"/>
-          <stop offset="100%" stopColor="#22D3EE" stopOpacity="0"/>
-        </linearGradient>
-      </defs>
-      <path d={area} fill="url(#revGrad)"/>
-      <polyline points={pts} fill="none" stroke="#22D3EE" strokeWidth="1.5"/>
-      {entries.map(([, v], i) => (
-        <circle key={i} cx={(i/(entries.length-1))*W} cy={H-(v/maxVal)*H*0.9-4} r="2.5" fill="#22D3EE"/>
-      ))}
-    </svg>
-  );
-}
-
-// ─── Main Dashboard ───────────────────────────────────────────────────────────
-export default function TransitOSDashboard() {
-  const [tickets, setTickets]     = useState([]);
-  const [simMode, setSimMode]     = useState(false);
-  const [apiOnline, setApiOnline] = useState(false);
-  const [lastSync, setLastSync]   = useState(null);
-  const ticketIdRef               = useRef(0);
-  const intervalRef               = useRef(null);
-
-  const fetchData = useCallback(async () => {
-    try {
-      // Use our centralized api instance with bypass headers
-      const res = await api.get("/ledger_live");
-      if (res.status === 200) {
-        setTickets(res.data);
-        setApiOnline(true);
-        setLastSync(new Date());
-        return;
-      }
-    } catch (err) {
-      console.error("Dashboard Connection Error", err);
-    }
-    setApiOnline(false);
-  }, []);
-
-  const addMockTicket = useCallback(() => {
-    ticketIdRef.current += 1;
-    setTickets(prev => [...prev, generateMockTicket(ticketIdRef.current)].slice(-200));
-    setLastSync(new Date());
-  }, []);
+export default function WalletPage() {
+  const [tickets,        setTickets]        = useState([])
+  const [balance,        setBalance]        = useState(0)
+  const [selectedTicket, setSelectedTicket] = useState(null)
+  const [refreshing,     setRefreshing]     = useState(false)
+  const [showAddMoney,   setShowAddMoney]   = useState(false)
 
   useEffect(() => { 
-    fetchData(); 
-  }, [fetchData]);
-
-  useEffect(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    if (simMode) {
-      // If API is online, poll the backend. If offline, simulate locally.
-      intervalRef.current = apiOnline
-        ? setInterval(fetchData, 2000)
-        : setInterval(() => {
-            const count = Math.floor(Math.random() * 3) + 1;
-            for (let i = 0; i < count; i++) addMockTicket();
-          }, 1200);
+    setTickets(loadTickets());
+    const savedBalance = localStorage.getItem('transitos_balance');
+    if (savedBalance === null) {
+      localStorage.setItem('transitos_balance', '1000.00');
+      setBalance(1000.00);
+    } else {
+      setBalance(parseFloat(savedBalance));
     }
-    return () => clearInterval(intervalRef.current);
-  }, [simMode, apiOnline, fetchData, addMockTicket]);
+  }, [])
 
-  const handleReset = async () => {
-    try { await api.post("/reset_db"); } catch {}
-    setTickets([]);
-    ticketIdRef.current = 0;
-  };
+  function handleRefresh() {
+    setRefreshing(true)
+    setTimeout(() => { 
+      setTickets(loadTickets());
+      const savedBalance = localStorage.getItem('transitos_balance');
+      setBalance(parseFloat(savedBalance || '0'));
+      setRefreshing(false);
+    }, 600)
+  }
 
-  const totalRevenue = tickets.reduce((s, t) => s + (t.total_fare || 0), 0);
-  const avgDist      = tickets.length ? tickets.reduce((s, t) => s + (t.distance_km || 0), 0) / tickets.length : 0;
-  const activeZones  = new Set(tickets.map(t => t.start_station)).size;
+  function handleAddMoney(amount) {
+    const newBalance = parseFloat((balance + amount).toFixed(2));
+    setBalance(newBalance);
+    localStorage.setItem('transitos_balance', newBalance.toString());
+  }
 
-  const routeMap = {};
-  tickets.forEach(t => {
-    const k = `${t.start_station} → ${t.end_station}`;
-    routeMap[k] = (routeMap[k] || 0) + 1;
-  });
-  const topRoutes = Object.entries(routeMap).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const totalSpent = tickets.reduce((s, t) => s + Number(t.fare || 0), 0)
 
   return (
-    <div style={{ minHeight: "100vh", background: "#0F172A", color: "#E2E8F0", fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
+    <>
+      {showAddMoney && (
+        <AddMoneyModal onClose={() => setShowAddMoney(false)} onAdd={handleAddMoney} />
+      )}
+      {selectedTicket && (
+        <TicketModal ticket={selectedTicket} onClose={() => setSelectedTicket(null)} />
+      )}
 
-      {/* ── Header ── */}
-      <div style={{
-        background: "#080E1A", borderBottom: "1px solid #1E3A5F",
-        padding: "0 24px", display: "flex", alignItems: "center",
-        justifyContent: "space-between", height: 52,
-      }}>
-        <span style={{ fontSize: 11, color: "#4A7FA5", letterSpacing: "0.15em", fontFamily: "'Courier New', monospace" }}>
-          MOBILITY KERNEL
-        </span>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          {apiOnline && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#4ADE80" }}>
-              <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#4ADE80", boxShadow: "0 0 6px #4ADE80" }}/>
-              API LIVE
-            </div>
-          )}
-          {lastSync && (
-            <span style={{ fontSize: 10, color: "#4A7FA5", fontFamily: "monospace" }}>
-              SYNC {lastSync.toLocaleTimeString("en-IN")}
-            </span>
-          )}
-          <button
-            onClick={() => setSimMode(s => !s)}
-            style={{
-              padding: "6px 14px", borderRadius: 6, fontSize: 11, fontWeight: 600,
-              border: `1px solid ${simMode ? "#F43F5E" : "#0EA5E9"}`,
-              background: simMode ? "#F43F5E18" : "#0EA5E918",
-              color: simMode ? "#F43F5E" : "#0EA5E9",
-              cursor: "pointer", letterSpacing: "0.08em",
-              fontFamily: "'Courier New', monospace", transition: "all 0.2s",
-            }}
-          >
-            {simMode ? "⬛ STOP SIM" : "▶ LIVE SIM"}
-          </button>
-          <button
-            onClick={handleReset}
-            style={{
-              padding: "6px 12px", borderRadius: 6, fontSize: 11,
-              border: "1px solid #F43F5E40", background: "#F43F5E12",
-              color: "#F43F5E", cursor: "pointer", letterSpacing: "0.08em",
-              fontFamily: "'Courier New', monospace",
-            }}
-          >
-            ⚠ RESET
+      <div className="min-h-screen" style={{ background: '#0F172A', fontFamily: "'Space Mono', monospace" }}>
+        <div className="flex items-center justify-between px-5 pt-5 pb-2">
+          <span className="text-[#0EA5E9] font-bold tracking-widest text-base">TransitOS</span>
+          <button onClick={handleRefresh} className="text-slate-500 hover:text-white transition-colors">
+            <RefreshCw className={cn('w-4 h-4', refreshing && 'animate-spin')} />
           </button>
         </div>
-      </div>
 
-      {/* ── Stat Cards ── */}
-      <div style={{ padding: "20px 24px 0", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}>
-        <StatCard label="Total Commuters" value={tickets.length.toLocaleString("en-IN")} sub="Active sessions"    color="#0EA5E9"/>
-        <StatCard label="Revenue (₹)"     value={`₹${Math.round(totalRevenue).toLocaleString("en-IN")}`} sub="Blockchain settled" color="#4ADE80"/>
-        <StatCard label="Avg Distance"    value={`${avgDist.toFixed(1)} km`}              sub="Haversine calc"    color="#22D3EE"/>
-        <StatCard label="Active Zones"    value={activeZones}                              sub="Unique origins"   color="#818CF8"/>
-      </div>
+        <div className="px-5 pt-3 pb-1">
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+            <Wallet className="w-6 h-6 text-[#22D3EE]" /> Wallet
+          </h1>
+          <p className="text-slate-500 text-sm mt-0.5">Manage your balance and view transaction history</p>
+        </div>
 
-      {/* ── Main Content ── */}
-      <div style={{ padding: "20px 24px", display: "grid", gridTemplateColumns: "1fr 300px", gap: 16 }}>
+        <div className="px-5 mt-4">
+          <div
+            className="rounded-2xl p-5 relative overflow-hidden"
+            style={{ background: 'linear-gradient(135deg, #0EA5E9 0%, #22D3EE 100%)' }}
+          >
+            <div className="absolute -top-6 -right-6 w-32 h-32 rounded-full bg-white/10" />
+            <div className="absolute -bottom-8 -right-2 w-24 h-24 rounded-full bg-white/5" />
 
-        {/* LEFT: Ledger */}
-        <div style={{ background: "#080E1A", border: "1px solid #1E3A5F", borderRadius: 12, overflow: "hidden" }}>
-          <div style={{ padding: "10px 16px", borderBottom: "1px solid #1E3A5F" }}>
-            <span style={{ fontSize: 11, color: "#4A7FA5", letterSpacing: "0.12em", fontFamily: "monospace" }}>
-              BLOCKCHAIN SETTLEMENT LEDGER
+            <p className="text-[10px] tracking-widest uppercase text-white/70 mb-1 relative z-10">
+              Available Balance
+            </p>
+            <div className="flex items-center gap-2 relative z-10">
+              <CreditCard className="w-5 h-5 text-white/80" />
+              <span className="text-4xl font-bold text-white tracking-tight">
+                ₹{balance.toFixed(2)}
+              </span>
+            </div>
+
+            <div className="flex gap-3 mt-4 relative z-10">
+              <button
+                onClick={() => setShowAddMoney(true)}
+                className="flex-1 flex items-center justify-center gap-1.5 bg-white/20 hover:bg-white/30 text-white text-sm font-semibold py-2.5 rounded-xl transition-colors"
+              >
+                <Plus className="w-4 h-4" /> Add Money
+              </button>
+              <button className="flex-1 flex items-center justify-center gap-1.5 bg-white/20 hover:bg-white/30 text-white text-sm font-semibold py-2.5 rounded-xl transition-colors">
+                <Send className="w-4 h-4" /> Send Money
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 px-5 mt-4">
+          <div className="rounded-xl p-4 border border-white/5" style={{ background: 'rgba(30,41,59,0.6)' }}>
+            <p className="text-[10px] text-slate-500 tracking-widest uppercase mb-1">Total Trips</p>
+            <p className="text-2xl font-bold text-white">{tickets.length}</p>
+          </div>
+          <div className="rounded-xl p-4 border border-white/5" style={{ background: 'rgba(30,41,59,0.6)' }}>
+            <p className="text-[10px] text-slate-500 tracking-widest uppercase mb-1">Total Spent</p>
+            <p className="text-2xl font-bold text-[#F43F5E]">₹{totalSpent.toFixed(2)}</p>
+          </div>
+        </div>
+
+        <div className="px-5 mt-6 pb-8">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-white font-bold text-base">Transaction History</h2>
+            <span className="text-[10px] text-slate-500 tracking-widest">
+              {tickets.length} transaction{tickets.length !== 1 ? 's' : ''}
             </span>
           </div>
-          <div style={{ overflowX: "auto", maxHeight: 520, overflowY: "auto" }}>
+
+          <div className="rounded-2xl border border-white/[0.08] overflow-hidden" style={{ background: 'rgba(15,23,42,0.8)' }}>
             {tickets.length === 0 ? (
-              <div style={{ padding: 60, textAlign: "center", color: "#4A7FA5", fontSize: 13 }}>
-                No transactions yet — toggle LIVE SIM or check backend connection
+              <div className="flex flex-col items-center justify-center py-14 text-center px-4">
+                <Wallet className="w-10 h-10 text-slate-700 mb-3" />
+                <p className="text-slate-500 text-sm">No transactions yet</p>
+                <p className="text-slate-700 text-xs mt-1">Book a trip to see it here</p>
               </div>
             ) : (
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                <thead>
-                  <tr style={{ background: "#0A1628" }}>
-                    {["TX HASH","COMMUTER","ROUTE","MODE","FARE","SPLIT"].map(h => (
-                      <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontSize: 10, color: "#4A7FA5", letterSpacing: "0.1em", fontWeight: 600, borderBottom: "1px solid #1E3A5F" }}>
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...tickets].reverse().slice(0, 100).map((t, i) => (
-                    <LedgerRow key={t.id || t.hash} ticket={t} index={i} />
-                  ))}
-                </tbody>
-              </table>
+              tickets.map(ticket => (
+                <TxRow key={ticket.ticket_id} ticket={ticket} onViewQR={setSelectedTicket} />
+              ))
             )}
           </div>
         </div>
-
-        {/* RIGHT: Panels */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-
-          {/* Revenue timeline */}
-          <div style={{ background: "#080E1A", border: "1px solid #1E3A5F", borderRadius: 12, overflow: "hidden" }}>
-            <div style={{ padding: "10px 14px", borderBottom: "1px solid #1E3A5F" }}>
-              <span style={{ fontSize: 10, color: "#4A7FA5", letterSpacing: "0.12em", fontFamily: "monospace" }}>REVENUE TIMELINE</span>
-            </div>
-            <div style={{ padding: "10px 14px" }}>
-              <RevenueTimeline tickets={tickets} />
-            </div>
-          </div>
-
-          {/* Mode distribution */}
-          <div style={{ background: "#080E1A", border: "1px solid #1E3A5F", borderRadius: 12, overflow: "hidden" }}>
-            <div style={{ padding: "10px 14px", borderBottom: "1px solid #1E3A5F" }}>
-              <span style={{ fontSize: 10, color: "#4A7FA5", letterSpacing: "0.12em", fontFamily: "monospace" }}>MODE DISTRIBUTION</span>
-            </div>
-            <div style={{ padding: "12px 14px" }}>
-              {tickets.length === 0
-                ? <div style={{ color: "#2D4A6B", fontSize: 12, textAlign: "center", padding: "10px 0" }}>No data</div>
-                : <ModeDistribution tickets={tickets} />
-              }
-            </div>
-          </div>
-
-          {/* Top routes */}
-          <div style={{ background: "#080E1A", border: "1px solid #1E3A5F", borderRadius: 12, overflow: "hidden" }}>
-            <div style={{ padding: "10px 14px", borderBottom: "1px solid #1E3A5F" }}>
-              <span style={{ fontSize: 10, color: "#4A7FA5", letterSpacing: "0.12em", fontFamily: "monospace" }}>HIGH TRAFFIC ROUTES</span>
-            </div>
-            <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
-              {topRoutes.length === 0
-                ? <div style={{ color: "#2D4A6B", fontSize: 12, textAlign: "center", padding: "10px 0" }}>No data</div>
-                : topRoutes.map(([route, count], i) => (
-                  <div key={route} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{
-                      width: 16, height: 16, borderRadius: 4, flexShrink: 0,
-                      background: i === 0 ? "#F43F5E20" : "#0EA5E915",
-                      border: `1px solid ${i === 0 ? "#F43F5E40" : "#0EA5E930"}`,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontSize: 9, color: i === 0 ? "#F43F5E" : "#0EA5E9", fontWeight: 700,
-                    }}>
-                      {i+1}
-                    </span>
-                    <span style={{ flex: 1, fontSize: 11, color: "#94A3B8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {route}
-                    </span>
-                    <span style={{ fontSize: 11, color: i === 0 ? "#F43F5E" : "#4A7FA5", fontFamily: "monospace" }}>
-                      {count}x
-                    </span>
-                  </div>
-                ))
-              }
-            </div>
-          </div>
-        </div>
       </div>
-    </div>
-  );
+
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap');
+      `}</style>
+    </>
+  )
 }

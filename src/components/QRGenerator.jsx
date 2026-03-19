@@ -43,7 +43,7 @@ export default function QRGenerator({ ticket, onBookAnother }) {
 
       {/* QR Code */}
       <div className="bg-white p-4 rounded-2xl mb-6 shadow-lg shadow-cyan-500/10">
-        <QRCodeSVG
+        <QRCode
           value={qrValue}
           size={200}
           level="H"

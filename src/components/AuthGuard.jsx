@@ -1,7 +1,6 @@
-import { Navigate } from "react-router-dom"
+import React from 'react';
 
-export default function AuthGuard({ roles, children }) {
-  const stored = localStorage.getItem("transitos_role")
-  if (!roles.includes(stored)) return <Navigate to="/" replace />
-  return children
+// HACKATHON BYPASS: Automatically approves any user and renders the dashboard!
+export default function AuthGuard({ children }) {
+  return <>{children}</>;
 }
